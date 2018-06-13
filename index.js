@@ -1,10 +1,15 @@
 class Subscription {
     constructor(unsubscribe) {
+        this._parent = null;
         this._subscriptions = null;
         this._unsubscribe = unsubscribe ? unsubscribe : null;
     }
-    add(){}
-    unsubscribe(){}
+    add(teardown) {
+        // const subscriptions = this._subscriptions || (this._subscriptions = []);
+        // subscriptions.push(teardown)
+        // teardown._parent = this;
+    }
+    unsubscribe() { }
 }
 
 class Subscriber extends Subscription {
@@ -18,12 +23,17 @@ class Subscriber extends Subscription {
         if (distinationOrNext instanceof Subscriber) {
             this.destination = distinationOrNext;
         }
+        //{
+        //  next(){},
+        //  error(){},
+        //  complete()
+        //}
         if (typeof distinationOrNext === 'object') {
             this.destination = {
                 next(value) {
-                    distinationOrNext.next 
-                    	? distinationOrNext.next(value) 
-                    	: distinationOrNext(value);
+                    distinationOrNext.next
+                        ? distinationOrNext.next(value)
+                        : distinationOrNext(value);
                 },
                 error(err) {
                     distinationOrNext.error(err)
@@ -34,6 +44,7 @@ class Subscriber extends Subscription {
             }
         }
 
+        // {function(){}, function(){}, function(){}}
         if (typeof distinationOrNext === 'function') {
             this.destination = {
                 next(value) {
@@ -45,6 +56,15 @@ class Subscriber extends Subscription {
                 complete() {
                     complete(error);
                 }
+            }
+        }
+
+        // empty subscriber
+        if (!distinationOrNext) {
+            this.destination = {
+                next() { },
+                error() { },
+                complete() { },
             }
         }
     }
@@ -104,9 +124,9 @@ class Observable {
 
         if (!observerOrNext && !error && !complete) {
             sink = new Subscriber({
-                next() {},
-                error() {},
-                complete() {},
+                next() { },
+                error() { },
+                complete() { },
             });
         }
 
@@ -115,11 +135,12 @@ class Observable {
         if (operator) {
             operator.call(sink, this.source);
         }
-        sink.add(
-            this.source ?
-            this.source :
-            this.trySubscribe(sink)
-        )
+        // sink.add(
+        //     this.source ?
+        //         this.source :
+        // this.trySubscribe(sink)
+        // )
+        this.source ? this.source : this.trySubscribe(sink)
 
         return sink;
     }
@@ -129,13 +150,19 @@ class Observable {
     }
 
     pipe(...operations) {
+        // pipe ()
         if (operations.length === 0) {
             return this;
         }
+        // pipe ( map(x => x+ 1))
         if (operations.length === 1) {
             return operations[0](this)
         }
-        return (function(input) {
+        // pipe(
+        //  map()
+        // take(),
+        //)
+        return (function (input) {
             return operations.reduce((prev, fn) => {
                 return fn(prev)
             }, input);

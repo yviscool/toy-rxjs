@@ -1,36 +1,78 @@
 var { Observable, Subscriber } = require('./')
 
 function filter(fnc) {
-    return function(source) {
-        return source.lift(new class {
+    return source =>
+        source.lift(new class {
             call(subscriber, source) {
                 return source.subscribe(new FilterSubscriber(subscriber, fnc));
             }
         })
-    }
 }
 
 function map(fnc) {
-    return function(source) {
+    return source =>
         // sourc above observable
-        return source.lift(new class {
+        source.lift(new class {
             call(subscriber, source) {
                 return source.subscribe(new MapSubscriber(subscriber, fnc));
             }
         })
-    }
 }
 
 function tap(fnc) {
-    return function(source) {
+    return source =>
         // sourc above observable
-        return source.lift(new class {
+        source.lift(new class {
             call(subscriber, source) {
                 return source.subscribe(new TapSubscriber(subscriber, fnc));
             }
         })
-    }
 }
+
+function skip(count) {
+    return source =>
+        source.lift(new class {
+            call(subscriber, source) {
+                return source.subscribe(new SkipSubscriber(subscriber, count));
+            }
+        })
+}
+
+function take(count) {
+    return source =>
+        source.lift(new class {
+            call(subscriber, source) {
+                return source.subscribe(new TakeSubscriber(subscriber, count));
+            }
+        })
+}
+
+
+
+
+function concatAll() {
+    return mergeAll(1)
+}
+
+function mergeAll(concurrent = Number.POSITIVE_INFINITY) {
+    return mergeMap(function (value) {
+        return value;
+    }, concurrent)
+}
+
+function concatMap(project) {
+    return mergeMap(project, 1)
+}
+
+function mergeMap(project, concurrent = Number.POSITIVE_INFINITY) {
+    return source =>
+        source.lift(new class {
+            call(observer, source) {
+                return source.subscribe(new MergeMapSubscriber(observer, project, concurrent))
+            }
+        })
+}
+
 
 class FilterSubscriber extends Subscriber {
     constructor(destination, fnc) {
@@ -66,6 +108,108 @@ class TapSubscriber extends Subscriber {
     }
 }
 
+class SkipSubscriber extends Subscriber {
+    constructor(destination, total) {
+        super(destination);
+        this.total = total;
+        this.count = 0;
+    }
+    next(value) {
+
+        if (++this.count > this.total) {
+            this.destination.next(value);
+        }
+    }
+}
+
+
+class TakeSubscriber extends Subscriber {
+    constructor(destination, total) {
+        super(destination);
+        this.total = total;
+        this.count = 0;
+    }
+    next(value) {
+        const total = this.total;
+        const count = ++this.count;
+        if (count <= total) {
+            this.destination.next(value);
+            if (count === total) {
+                this.destination.complete();
+                this.unsubscribe();
+            }
+        }
+    }
+}
+
+class MergeMapSubscriber extends Subscriber {
+    constructor(destination, project, concurrent) {
+        super(destination);
+        this.project = project;
+        this.concurrent = concurrent;
+
+        this.active = 0;
+        this.index = 0;
+        this.buffer = [];
+        this.hasCompleted = false;
+    }
+
+    next(value) {
+        if (this.active < this.concurrent) {
+            this._tryNext(value);
+        } else {
+            this.buffer.push(value);
+        }
+    }
+
+    complete() {
+        this.hasCompleted = true;
+        if (this.active === 0 && this.buffer.length === 0) {
+            this.destination.complete();
+        }
+    }
+
+    _tryNext(value) {
+        const index = this.index++;
+        const result = this.project(value, index);
+        const ctx = this;
+        this.active++;
+        result.subscribe(new class extends Subscriber {
+            constructor() {
+                super();
+                //这里是 parent
+                this.parent = ctx;
+                this.index = 0;
+
+                this.outerValue = value;
+                this.outerIndex = index;
+            }
+            next(value) {
+                this.parent.notifyNext(this.outerValue, value, this.outerIndex, this.index++, this);
+            }
+            complete() {
+                this.parent.notifyComplete(this);
+                this.unsubscribe();
+            }
+        })
+    }
+
+    notifyNext(outerValue, innerValue, outerIndex, innerIndex, innerSub) {
+        this.destination.next(innerValue);
+    }
+
+    notifyComplete(innerSub) {
+        const buffer = this.buffer;
+        this.active--;
+        if (buffer.length > 0) {
+            this.next(buffer.shift());
+        } else if (this.active === 0 && this.hasCompleted) {
+            this.destination.complete()
+        }
+    }
+}
+
+
 function from(input) {
     if (input instanceof Observable) {
         return input;
@@ -96,12 +240,30 @@ function defer(observableFactory) {
     return new Observable(subscriber => {
         var input = observableFactory()
         var source = input ? from(input) : {
-            next() {},
-            error() {},
-            complete() {}
+            next() { },
+            error() { },
+            complete() { }
         }
         return source.subscribe(subscriber)
     })
+}
+
+function merge(...observables) {
+    return mergeAll(Number.POSITIVE_INFINITY)(new Observable(subscriber => {
+        observables.forEach(v => {
+            subscriber.next(v)
+        })
+        subscriber.complete()
+    }));
+}
+
+function concat(...observables) {
+    return concatAll()(new Observable(subscriber => {
+        observables.forEach(v => {
+            subscriber.next(v)
+        })
+        subscriber.complete()
+    }));
 }
 
 
@@ -110,12 +272,69 @@ function defer(observableFactory) {
 //         subscriber.next(3)
 //         subscriber.complete()
 //     }))
-    from([1,2,3,4])
-    .pipe(
-        tap(x => {}),
-        // filter(x => x > 2),
-        // map(x => x + 1)
-    )
-    .toPromise()
-    .then(console.log)
-    .catch(console.log)
+// .toPromise()
+// .then(console.log)
+// .catch(console.log)
+
+// from([1, 2, 3, 4])
+//     .pipe(
+//         // tap(x => { }),
+//         //concatMap(x => from([x, 1]).pipe(take(1)))
+//         mergeMap(x => from([x, 1]).pipe(take(1)))
+//         // filter(x => x > 2),
+//         // map(x => x + 1)
+//     )
+//     .subscribe({
+//         next(x) { console.log(x) },
+//         complete() { },
+//     })
+
+
+/**
+ *  mergeMap, concatMap
+ */
+// from([1, 2, 3, 4])
+//     .pipe(
+//         //concatMap(x => from([x, 1]).pipe(take(1)))
+//         mergeMap(x => from([x, 1]).pipe(take(1)))
+//     )
+//     .subscribe({
+//         next(x) { console.log(x) },
+//         complete() { },
+//     })
+
+
+/**
+ *  concatAll, mergeAll
+ */
+// from([from([1]), from([2])])
+//     .pipe(
+//         concatAll(),
+//     // mergeAll(),
+// )
+//     .subscribe({
+//         next(x) { console.log(x) },
+//         complete() { },
+//     })
+
+
+/**
+ *  concat, merge
+ */
+// merge(
+//     from([1, 2, 3]).pipe(take(2)),
+//     from([4, 5, 6]).pipe(take(3))
+// )
+concat(
+    from([1, 2, 3]).pipe(take(2)),
+    from([4, 5, 6]).pipe(take(3))
+)
+    .subscribe({
+        next(x) { console.log(x) },
+        complete() { },
+    })
+
+// 等同于
+// from([1,2,3]).pipe(take(2)).subscrie(new InnerSubscriber{
+//
+//})
