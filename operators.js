@@ -1,14 +1,5 @@
 var { Observable, Subscriber } = require('./')
 
-function filter(fnc) {
-    return source =>
-        source.lift(new class {
-            call(subscriber, source) {
-                return source.subscribe(new FilterSubscriber(subscriber, fnc));
-            }
-        })
-}
-
 function map(fnc) {
     return source =>
         // sourc above observable
@@ -74,18 +65,6 @@ function mergeMap(project, concurrent = Number.POSITIVE_INFINITY) {
 }
 
 
-class FilterSubscriber extends Subscriber {
-    constructor(destination, fnc) {
-        super(destination);
-        this.fnc = fnc;
-    }
-    next(value) {
-        if (this.fnc.call(null, value)) {
-            this.destination.next(value)
-        }
-    }
-}
-
 class MapSubscriber extends Subscriber {
     constructor(destination, fnc) {
         super(destination);
@@ -130,8 +109,8 @@ class TakeSubscriber extends Subscriber {
         this.count = 0;
     }
     next(value) {
-        const total = this.total;
-        const count = ++this.count;
+        var total = this.total;
+        var count = ++this.count;
         if (count <= total) {
             this.destination.next(value);
             if (count === total) {
@@ -170,9 +149,9 @@ class MergeMapSubscriber extends Subscriber {
     }
 
     _tryNext(value) {
-        const index = this.index++;
-        const result = this.project(value, index);
-        const ctx = this;
+        var index = this.index++;
+        var result = this.project(value, index);
+        var ctx = this;
         this.active++;
         result.subscribe(new class extends Subscriber {
             constructor() {
@@ -267,6 +246,20 @@ function concat(...observables) {
 }
 
 
+exports.defer = defer;
+exports.from = from;
+exports.merge = merge;
+exports.concat = concat;
+
+exports.tap = tap;
+exports.take = take;
+exports.map = map;
+exports.skip = skip;
+exports.concatAll = concatAll;
+exports.concatMap = concatMap;
+exports.mergeMap = mergeMap;
+exports.mergeAll = mergeAll;
+
 // defer(() => Observable.create(subscriber => {
 //         subscriber.next(1)
 //         subscriber.next(3)
@@ -325,14 +318,14 @@ function concat(...observables) {
 //     from([1, 2, 3]).pipe(take(2)),
 //     from([4, 5, 6]).pipe(take(3))
 // )
-concat(
-    from([1, 2, 3]).pipe(take(2)),
-    from([4, 5, 6]).pipe(take(3))
-)
-    .subscribe({
-        next(x) { console.log(x) },
-        complete() { },
-    })
+// concat(
+//     from([1, 2, 3]).pipe(take(2)),
+//     from([4, 5, 6]).pipe(take(3))
+// )
+//     .subscribe({
+//         next(x) { console.log(x) },
+//         complete() { },
+//     })
 
 // 等同于
 // from([1,2,3]).pipe(take(2)).subscrie(new InnerSubscriber{

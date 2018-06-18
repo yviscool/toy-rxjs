@@ -1,10 +1,10 @@
 var { Observable, Subscriber, Subscription } = require('./')
+var { take } = require('./operators')
 
 
 class AsyncScheduler {
     constructor(ScheduleAction) {
         this.ScheduleAction = ScheduleAction;
-        this.scheduler = undefined;
     }
 
     schedule(work, delay, state) {
@@ -28,6 +28,9 @@ class Asynction extends Subscription {
     }
 
     schedule(state, delay) {
+        if (this.closed) {
+            return this;
+        }
         this.state = state;
         var id = this.id;
         var scheduler = this.scheduler;
@@ -43,62 +46,68 @@ class Asynction extends Subscription {
         this.work(state);
     }
 
-    unsubscribe() {
-        var id = this.id;
+    _unsubscribe() {
         this.work = null;
         this.state = null;
         this.scheduler = null;
-        this.id = clearInterval(id);
+        this.id = clearInterval(this.id);
         this.delay = null;
     }
 }
 
 
-const async = new AsyncScheduler(Asynction);
+var async = new AsyncScheduler(Asynction);
 
 function interval(period = 0, scheduler = async) {
     return new Observable(subscriber => {
-        scheduler.schedule(function dispatch(state) {
-            var { subscriber, counter, period } = state;
-            subscriber.next(counter);
-            this.schedule({ subscriber, counter: counter + 1, period }, period);
-        }, period, { subscriber, counter: 0, period })
+        subscriber.add(
+            scheduler.schedule(function dispatch(state) {
+                var { subscriber, counter, period } = state;
+                subscriber.next(counter);
+                this.schedule({ subscriber, counter: counter + 1, period }, period);
+            }, period, { subscriber, counter: 0, period })
+        )
+        return subscriber;
     })
 }
 
-function take(count) {
-    return source =>
-        source.lift(new class {
-            call(subscriber, source) {
-                return source.subscribe(new TakeSubscriber(subscriber, count));
-            }
-        })
+function timer(dueTime, period, scheduler = async) {
+    return new Observable(subscriber => {
+        return scheduler.schedule(function dispatch(state) {
+            var { index, period, subscriber } = state;
+            subscriber.next(index);
+            if (subscriber.closed){
+                return;
+            } 
+            state.index = index + 1;
+            this.schedule(state, period);
+        }, dueTime, { index: 0, period, subscriber })
+    })
 }
 
-class TakeSubscriber extends Subscriber {
-    constructor(destination, total) {
-        super(destination);
-        this.total = total;
-        this.count = 0;
-    }
-    next(value) {
-        const total = this.total;
-        const count = ++this.count;
-        if (count <= total) {
-            this.destination.next(value);
-            if (count === total) {
-                this.destination.complete();
-                this.unsubscribe();
-            }
-        }
-    }
-}
 
-interval(1000)
+/**
+ * inteval
+ */
+// interval(200)
+//     .pipe(
+//         take(3)
+//     )
+//     .subscribe({
+//         next(a) { console.log(a) },
+//         complete() { console.log('complete'); }
+//     })
+
+
+/**
+ *  timer
+ */
+
+timer(3000, 1000)
     .pipe(
         take(3)
     )
     .subscribe({
-        next(a){console.log(a)},
-        complete(){console.log('complete');}
+        next(a) { console.log(a) },
+        complete() { console.log('complete'); }
     })

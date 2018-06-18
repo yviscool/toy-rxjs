@@ -1,16 +1,39 @@
 class Subscription {
     constructor(unsubscribe) {
-        this._parent = null;
         this._subscriptions = null;
-        this._unsubscribe = unsubscribe ? unsubscribe : null;
+        this.closed = false;
+        if (unsubscribe){
+            this._unsubscribe = unsubscribe ;
+        }
     }
     add(teardown) {
-        // const subscriptions = this._subscriptions || (this._subscriptions = []);
-        // subscriptions.push(teardown)
-        // teardown._parent = this;
+        if (!teardown) {
+            return new Subscription();
+        }
+        if (teardown === this){
+            // 过滤自己， 比方说 interval 的 subscriber add 了 一个 action，
+            // 然后 observable subscribe的时候 这个 subscriber 又会 add(this._subscribe()) => this._subscribe() 返回 这个 subscriberl
+            return this;
+        }
+        const subscriptions = this._subscriptions || (this._subscriptions = []);
+        subscriptions.push(teardown);
     }
-    unsubscribe() { 
-        
+    unsubscribe() {
+        this.closed = true;
+        var { _subscriptions, _unsubscribe } = this;
+
+        if (_unsubscribe){
+            _unsubscribe.call(this);
+        }
+
+        if (Array.isArray(_subscriptions)) {
+            var i = -1;
+            var len = _subscriptions.length;
+            while (++i < len) {
+                var sub = _subscriptions[i];
+                sub.unsubscribe.call(sub);
+            }
+        }
     }
 }
 
@@ -121,29 +144,33 @@ class Observable {
         var { operator } = this;
 
         if (observerOrNext && (observerOrNext instanceof Subscriber)) {
+            // {
+            //     next(){},
+            //     error(){},
+            //     complete(){},
+            // }
             sink = observerOrNext;
-        }
-
-        if (!observerOrNext && !error && !complete) {
+        } else if (!observerOrNext && !error && !complete) {
+            // empty observer
             sink = new Subscriber({
                 next() { },
                 error() { },
                 complete() { },
             });
+        } else {
+            //  subscrive(next, error, complete)
+            sink = new Subscriber(observerOrNext, error, complete);
         }
-
-        sink = new Subscriber(observerOrNext, error, complete);
 
         if (operator) {
             operator.call(sink, this.source);
+        } else {
+            sink.add(
+                this.source
+                ? this._subscribe(sink)
+                : this.trySubscribe(sink)
+            )
         }
-        // sink.add(
-        //     this.source ?
-        //         this.source :
-        // this.trySubscribe(sink)
-        // )
-        this.source ? this.source : this.trySubscribe(sink)
-
         return sink;
     }
 
