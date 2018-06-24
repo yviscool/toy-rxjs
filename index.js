@@ -97,7 +97,7 @@ class Subscriber extends Subscription {
         if (!this.isStopped)
             this.destination.next(value);
     }
-    error(error) {
+    error(err) {
         if (!this.isStopped) {
             this.destination.error(err);
             this.unsubscribe();

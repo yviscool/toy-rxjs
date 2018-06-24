@@ -86,6 +86,9 @@ function timer(dueTime, period, scheduler = async) {
 }
 
 
+exports.interval = interval;
+exports.timer = timer;
+
 /**
  * inteval
  */
@@ -103,11 +106,11 @@ function timer(dueTime, period, scheduler = async) {
  *  timer
  */
 
-timer(3000, 1000)
-    .pipe(
-        take(3)
-    )
-    .subscribe({
-        next(a) { console.log(a) },
-        complete() { console.log('complete'); }
-    })
+// timer(3000, 1000)
+//     .pipe(
+//         take(3)
+//     )
+//     .subscribe({
+//         next(a) { console.log(a) },
+//         complete() { console.log('complete'); }
+//     })
