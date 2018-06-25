@@ -1,6 +1,7 @@
+
 var { Observable, Subscriber, Subscription } = require('./')
 var { interval } = require('./scheduler')
-var { take, from } = require('./operators')
+var { take, from, tap } = require('./operators')
 
 
 
@@ -16,21 +17,12 @@ class Subject extends Observable {
         this.throwError = null;
     }
 
-    // static create(destination, source) {
-    //     return new AnonymousSubject(destination, source);
-    // }
-
-    // lift(operators) {
-    //     var subject = new AnonymousSubject(this, this);
-    //     subject.operators = operators;
-    //     return subject;
-    // }
 
     next(value) {
         if (!this.isStopped) {
             var { observers } = this;
             var len = observers.length;
-            var copy = observers.slice();
+            var copy = observers.slice()
             for (let i = 0; i < len; i++) {
                 copy[i].next(value)
             }
@@ -82,71 +74,42 @@ class Subject extends Observable {
         }
 
         this.observers.push(subscriber);
-        // return new SubjectSubscription(this, subscriber);
+        return new SubjectSubscription(this, subscriber);
     }
 }
 
-// class AnonymousSubject extends Subject {
-//     constructor(destination, source) {
-//         super();
-//         this.source = source;
-//     }
 
-//     next(value) {
-//         var { destination } = this;
-//         destination.next(value)
-//     }
+class SubjectSubscription extends Subscription {
+    constructor(subject, subscriber) {
+        super();
+        this.subject = subject;
+        this.subscriber = subscriber;
+        this.closed = false;
+    }
 
+    unsubscribe() {
+        if (this.closed) {
+            return;
+        }
 
-//     error(err) {
-//         var { destination } = this;
-//         destination.error(error)
-//     }
+        this.closed = true;
 
-//     complete() {
-//         var { destination } = this;
-//         debuggers.complete(); j
-//     }
+        var subject = this.subject;
+        var observers = subject.observers;
 
-//     _subscribe(subscriber) {
-//         var { source } = this;
-//         return source
-//             ? this.source.subscribe(subscriber)
-//             : new Subscription();
-//     }
-// }
+        this.subject = null;
 
-// class SubjectSubscription extends Subscription {
-//     constructor(subject, subscriber) {
-//         super();
-//         this.subject = subject;
-//         this.subscriber = subscriber;
-//         this.closed = false;
-//     }
+        if (!observers || observers.length === 0 || subject.isStopped || subject.closed) {
+            return;
+        }
 
-//     unsubscribe() {
-//         if (this.closed) {
-//             return;
-//         }
+        var subscriberIndex = observers.indexOf(this.subscriber);
 
-//         this.closed = true;
-
-//         var subject = this.subject;
-//         var observers = subject.observers;
-
-//         this.subject = null;
-
-//         if (!observers || observers.length === 0 || subject.isStopped || subject.closed) {
-//             return;
-//         }
-
-//         var subscriberIndex = observers.indexOf(this.subscriber);
-
-//         if (subscriberIndex !== -1) {
-//             observers.splice(subscriberIndex, 1)
-//         }
-//     }
-// }
+        if (subscriberIndex !== -1) {
+            observers.splice(subscriberIndex, 1)
+        }
+    }
+}
 
 class ConnectableObservable extends Observable {
     constructor() {
@@ -180,6 +143,9 @@ class ConnectableObservable extends Observable {
             connection.add(
                 // 这里 subscribe 是通过 source 来订阅的，而不是 通过 _subscribe() 代理的 
                 this.source.subscribe(new ConnectableSubscriber(this.getSubject(), this))
+
+                //  正常 connection add 了 一个 ConnectableSubscriber
+                // 而 this.source.subscribe 的时候 ConnectableSubscriber 又 add 了上一级的 subscribe/ action 
             )
 
             if (connection.closed) {
@@ -189,13 +155,12 @@ class ConnectableObservable extends Observable {
                 this._connection = connection;
             }
         }
-
         return connection;
     }
 
-    // refCount(){
-    //     return 
-    // }
+    refCount(){
+        return refCount()(this)
+    }
 }
 
 class ConnectableSubscriber extends Subscriber {
@@ -204,30 +169,30 @@ class ConnectableSubscriber extends Subscriber {
         this.connectable = connectable;
     }
 
-    error(err) {
-        this._unsubscribe();
-        super.error(err);
-    }
+    // error(err) {
+    //     this._unsubscribe();
+    //     super.error(err);
+    // }
 
-    compelte() {
-        this.connectable._isComplete = true;
-        this.unsubscribe();
-        super.complete();
-    }
+    // compelte() {
+    //     this.connectable._isComplete = true;
+    //     this._unsubscribe();
+    //     super.complete();
+    // }
 
-    unsubscribe() {
-        var connectable = this.connectable;
-        if (connectable) {
-            this.connectable = null;
-            var connection = connectable._connection;
-            connectable._refCount = 0;
-            connectable._subscriptions = null;
-            connectable._subject = null;
-            if (connection) {
-                connection.unsubscribe();
-            }
-        }
-    }
+    // _unsubscribe() {
+    //     var connectable = this.connectable;
+    //     if (connectable) {
+    //         this.connectable = null;
+    //         var connection = connectable._connection;
+    //         connectable._refCount = 0;
+    //         connectable._connection = null;
+    //         connectable._subject = null;
+    //         if (connection) {
+    //             connection.unsubscribe();
+    //         }
+    //     }
+    // }
 }
 
 function multicast(subjectOrSubjectFactory, selector) {
@@ -239,7 +204,8 @@ function multicast(subjectOrSubjectFactory, selector) {
         }
         var connectableProto = ConnectableObservable.prototype;
         var connectable = Object.create(source, {
-            operators: { value: null },
+            // ！！！！ 这里一定要 source 的 operator 替换成 null, 否则会导致 执行多次 operator.call(..);
+            operator: { value: null }, 
             _refCount: { value: 0, writable: true },
             _subject: { value: null, writable: true },
             // 重写 _subscribe, 
@@ -247,12 +213,11 @@ function multicast(subjectOrSubjectFactory, selector) {
             _isComplete: { value: connectableProto._isComplete, writable: true },
             getSubject: { value: connectableProto.getSubject },
             connect: { value: connectableProto.connect },
-            // refCount: { value: connectableProto.refCount }
+            refCount: { value: connectableProto.refCount }
         });
 
         connectable.source = source;
         connectable.subjectFactory = subjectFactory;
-
         return connectable;
     }
 }
@@ -311,20 +276,34 @@ var b = {
 /**
  *  multicast, connect
  */
-// var source = interval(1000)
-//     .pipe(
-//         multicast(new Subject())
-//     )
 
-// // 这里订阅实际上是 通过代理放在 subject 里面。
-// source.subscribe(a)
+var source = interval(1000)
+    .pipe(
+        tap((x)=>{console.log('tap : ', x);}),
+        multicast(new Subject())
+    )
 
-// source.connect();
+// 这里订阅实际上是 通过代理放在 subjct 里面。
+var subscriptionA = source.subscribe(a)
+var realSubscription = source.connect();
+// console.log(realSubscription._subscriptions);
 
-// setTimeout(() => {
-//     source.subscribe(b)
-// }, 3000);
+var subscriptionB;
+setTimeout(() => {
+    subscriptionB = source.subscribe(b)
+}, 3000);
 
+
+setTimeout(() => {
+    subscriptionA.unsubscribe();
+    subscriptionB.unsubscribe(); 
+    // A , B 取消订阅，但 source 还会继续送元素
+}, 5000);
+
+setTimeout(() => {
+    realSubscription.unsubscribe();
+    // 这里 source 才会真正停止送元素
+}, 7000);
 
 
 /**
@@ -336,6 +315,14 @@ var b = {
 //         multicast(new Subject()),
 //         refCount()
 //     )
+
+// or 
+
+// var source = interval(1000)
+//     .pipe(
+//         multicast(new Subject())  // multicase 返回的 connectable 自带一个 refcount 方法
+//     )
+//     .refCount();
 
 // source.subscribe(a)
 
@@ -366,13 +353,13 @@ var b = {
  * share 
  */
 
-var source = interval(1000)
-    .pipe(
-        share()
-    )
+// var source = interval(1000)
+//     .pipe(
+//         share()
+//     )
 
-source.subscribe(a)
+// source.subscribe(a)
 
-setTimeout(() => {
-    source.subscribe(b)
-}, 3000);
+// setTimeout(() => {
+//     source.subscribe(b)
+// }, 3000);

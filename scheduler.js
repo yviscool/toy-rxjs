@@ -12,7 +12,7 @@ class AsyncScheduler {
     }
 
     flush(action) {
-        var { actions } = this;
+        // var { actions } = this;
         action.execute(action.state, action.delay);
     }
 }

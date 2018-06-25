@@ -47,6 +47,17 @@ class Subscriber extends Subscription {
         this.isStopped = false;
         if (distinationOrNext instanceof Subscriber) {
             this.destination = distinationOrNext;
+
+            // 为什么这里要 add this ？ 传递上级 subscribe, 以便 unsubscribe 能找到 
+            // 比方说 
+            // var b = interval().pipe(tap(), multicast(new subject())) b.subscribe(xx) b.connect()
+            // TapSubscriber { _subscriptions:[AsyncAction] }  会在 interval subscriber.add( action ) 
+            //  ConnectableSubscriber{ _subscriptions: [TapSubscriber]}  会在 source.subscribe(Tapsbuscribe(ConnectableSubscriber)) 的时候添加
+
+
+            // 正常 内部的 subscription unsubscribe 会 遍历 _subscription 然后执行 他们的 unsubscribe 
+            // 这里为例  subscription => unsubscribe => ConnectableSubscriber =》 unsubscribe 会找到 TapSubscriber=> TapSubscriber=> 取消定时
+            distinationOrNext.add(this);
         }
         //{
         //  next(){},
@@ -161,7 +172,6 @@ class Observable {
             //  subscrive(next, error, complete)
             sink = new Subscriber(observerOrNext, error, complete);
         }
-
         if (operator) {
             operator.call(sink, this.source);
         } else {

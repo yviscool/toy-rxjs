@@ -85,6 +85,10 @@ class TapSubscriber extends Subscriber {
         var result = this.fnc.call(null, value)
         this.destination.next(value);
     }
+
+    complete() {
+        return this.destination.complete();
+    }
 }
 
 class SkipSubscriber extends Subscriber {
