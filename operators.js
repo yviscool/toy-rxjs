@@ -38,7 +38,41 @@ function take(count) {
         })
 }
 
+function takeUntil(notifier) {
+    return source =>
+        source.lift(new class {
+            call(subscriber, source) {
+                var takeUnitlSubscriber = new TakeUntilSubscriber(subscriber);
+                var notifierSubscription = notifier.subscribe(new class extends Subscriber {
+                    constructor(parent) {
+                        super();
+                        this.parent = takeUnitlSubscriber;
+                    }
+                    next(v) {
+                        this.parent.notifyNext();
+                    }
+                    complete() {
+                        // this.parent.notifyComplete();
+                        this.unsubscribe();
+                    }
+                })
+                if (notifierSubscription && !notifierSubscription.closed) {
+                    takeUnitlSubscriber.add(notifierSubscription)
+                    return source.subscribe(takeUnitlSubscriber);
+                }
+                return source.subscribe
+            }
+        })
+}
 
+function takeWhile(predicate) {
+    return source =>
+        source.lift(new class {
+            call(subscriber, source) {
+                return source.subscribe(new TakeWhileSubscriber(subscriber, predicate))
+            }
+        })
+}
 
 
 function concatAll() {
@@ -124,6 +158,41 @@ class TakeSubscriber extends Subscriber {
         }
     }
 }
+
+
+class TakeUntilSubscriber extends Subscriber {
+    constructor(destination) {
+        super(destination)
+    }
+    notifyNext() {
+        this.complete();
+    }
+    notifyComplete() { }
+}
+
+
+
+class TakeWhileSubscriber extends Subscriber {
+    constructor(destination, predicate) {
+        super(destination)
+        this.predicate = predicate;
+        // this.index = 0;
+    }
+    next(v) {
+        var result = this.predicate(v, /**this.index++**/)
+        this.nextOrComplete(v, result)
+    }
+
+    nextOrComplete(v, result) {
+        var destination = this.destination;
+        if (Boolean(result)) {
+            destination.next(v)
+        } else {
+            destination.complete()
+        }
+    }
+}
+
 
 class MergeMapSubscriber extends Subscriber {
     constructor(destination, project, concurrent) {
@@ -335,3 +404,33 @@ exports.mergeAll = mergeAll;
 // from([1,2,3]).pipe(take(2)).subscrie(new InnerSubscriber{
 //
 //})
+
+
+/**
+ *  takeUntil
+ */
+
+// var { interval } = require('./scheduler');
+
+// interval(1000)
+//     .pipe(
+//         takeUntil(interval(3000))
+//     )
+//     .subscribe({
+//         next(x) { console.log(x); },
+//         complete() { }
+//     })
+
+
+/**
+ * takeWhile
+ */
+
+// interval(1000)
+//     .pipe(
+//         takeWhile(v => v < 3)
+//     )
+//     .subscribe({
+//         next(x) { console.log(x); },
+//         complete() { } 
+//     })
