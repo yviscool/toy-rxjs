@@ -1,4 +1,7 @@
-var { Observable, Subscriber } = require('./')
+var {
+    Observable,
+    Subscriber
+} = require('./')
 
 function map(fnc) {
     return source =>
@@ -60,7 +63,7 @@ function takeUntil(notifier) {
                     takeUnitlSubscriber.add(notifierSubscription)
                     return source.subscribe(takeUnitlSubscriber);
                 }
-                return source.subscribe
+                return takeUnitlSubscriber;
             }
         })
 }
@@ -75,12 +78,29 @@ function takeWhile(predicate) {
 }
 
 
+function buffer(closingNotifier) {
+    return source => source.lift(new class {
+        call(subscriber, source) {
+            return source.subscribe(new BufferSubscriber(subscriber, closingNotifier))
+        }
+    });
+}
+
+function bufferCount(bufferSize){
+    return source => 
+            source.lift(new class {
+                call(subscriber, source){
+                    return source.subscribe(new BufferCountSubscriber(subscriber, bufferSize))
+                }
+            })
+}
+
 function concatAll() {
     return mergeAll(1)
 }
 
 function mergeAll(concurrent = Number.POSITIVE_INFINITY) {
-    return mergeMap(function (value) {
+    return mergeMap(function(value) {
         return value;
     }, concurrent)
 }
@@ -167,7 +187,7 @@ class TakeUntilSubscriber extends Subscriber {
     notifyNext() {
         this.complete();
     }
-    notifyComplete() { }
+    notifyComplete() {}
 }
 
 
@@ -179,7 +199,7 @@ class TakeWhileSubscriber extends Subscriber {
         // this.index = 0;
     }
     next(v) {
-        var result = this.predicate(v, /**this.index++**/)
+        var result = this.predicate(v, /**this.index++**/ )
         this.nextOrComplete(v, result)
     }
 
@@ -261,6 +281,61 @@ class MergeMapSubscriber extends Subscriber {
     }
 }
 
+// 跟 mergeMap 有点像
+class BufferSubscriber extends Subscriber {
+    constructor(destination, closingNotifier) {
+        super(destination);
+        this.buffer = [];
+        var ctx = this;
+        this.add(closingNotifier.subscribe(new class extends Subscriber {
+            constructor() {
+                super();
+                //这里是 parent
+                this.parent = ctx;
+            }
+            next(value) {
+                this.parent.notifyNext();
+            }
+            complete() {
+                this.parent.notifyComplete(this);
+                this.unsubscribe();
+            }
+        }))
+    }
+
+    next(v){
+        this.buffer.push(v);
+    }
+
+    notifyNext(){
+        var buffer = this.buffer;
+        this.buffer = [];;
+        this.destination.next(buffer)
+    }
+
+    notifyComplete() {
+        this.destination.complete();
+    }
+}
+
+class BufferCountSubscriber extends Subscriber{
+
+    constructor(destination, bufferSize){
+        super(destination)
+        this.bufferSize = bufferSize;
+        this.buffer = [];
+    }
+
+    next(value){
+        var buffer = this.buffer;
+        buffer.push(value)
+
+        if (buffer.length === this.bufferSize){
+            this.destination.next(buffer);
+            this.buffer = [];
+        }
+    }
+}
 
 function from(input) {
     if (input instanceof Observable) {
@@ -291,11 +366,9 @@ function from(input) {
 function defer(observableFactory) {
     return new Observable(subscriber => {
         var input = observableFactory()
-        var source = input ? from(input) : {
-            next() { },
-            error() { },
-            complete() { }
-        }
+        var source = input ?
+            from(input) :
+            new Observable(subscriber => subscriber.complete())
         return source.subscribe(subscriber)
     })
 }
@@ -434,3 +507,47 @@ exports.mergeAll = mergeAll;
 //         next(x) { console.log(x); },
 //         complete() { } 
 //     })
+
+
+
+/** 
+ * buffer
+ */
+
+// expect 
+// [ 0, 1, 2 ]
+// [ 3, 4, 5 ]
+// [ 6, 7, 8 ]
+// [ 9, 10, 11, 12 ]
+
+
+// var { interval } = require('./scheduler');
+// var source = interval(300);
+// var source2 = interval(1000);
+// var example = source.pipe(buffer(source2))
+
+// example.subscribe({
+//     next: (value) => { console.log(value); },
+//     error: (err) => { console.log('Error: ' + err); },
+//     complete: () => { console.log('complete'); }
+// });
+
+
+/**
+ * bufferCount
+ */
+
+// expect
+// [ 0, 1 ]
+// [ 2, 3 ]
+// [ 4, 5 ]
+// [ 6, 7 ]
+
+// var source = interval(300);
+// var example = source.pipe(bufferCount(2))
+
+// example.subscribe({
+//     next: (value) => { console.log(value); },
+//     error: (err) => { console.log('Error: ' + err); },
+//     complete: () => { console.log('complete'); }
+// });
